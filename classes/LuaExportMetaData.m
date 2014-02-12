@@ -469,6 +469,9 @@ static inline id getObjectResult(NSInvocation *invocation) {
 //NSLog(@"%ld: %s", idx, [metaData->signature getArgumentTypeAtIndex:idx+2]);
         setArgumentAt(metaData->invocation, idx, [metaData->argumentSizes[idx] unsignedIntValue], obj);
     }];
+    // make sure all un-passed args are nil'd out
+    for( NSUInteger idx = [args count]; idx < [metaData->argumentSizes count]; ++idx )
+        setArgumentAt(metaData->invocation, idx, 0, [NSNull null]);
 
     [metaData->invocation invokeWithTarget:instance];
 
