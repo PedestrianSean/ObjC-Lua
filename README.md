@@ -61,12 +61,6 @@ LUA_STRING(
 @property(nonatomic) CGPoint center;
 @property(nonatomic) CGRect frame;
 
-// this can be called from Lua as view1.addSubview(view2)
-- (void)addSubview:(UIView*)view;
-// this can be called from Lua as view1.insertSubviewAboveSubview(view2, siblingSubview)
-- (void)insertSubview:(UIView *)view aboveSubview:(UIView *)siblingSubview;
-// this can be called from Lua as view1.insertSubviewBelowSubview(view2, siblingSubview)
-- (void)insertSubview:(UIView *)view belowSubview:(UIView *)siblingSubview;
 - (void)removeFromSuperview;
 
 @end
