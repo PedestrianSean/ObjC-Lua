@@ -1,0 +1,8 @@
+language: objective-c
+before_install: sudo easy_install cpp-coveralls
+xcode_project: LuaTests.xcodeproj
+xcode_scheme: objc2lua
+after_success:
+  - find ~/Library/Developer/Xcode/DerivedData/ -name "*.gcno" -exec cp -v '{}' . \;
+  - find ~/Library/Developer/Xcode/DerivedData/ -name "*.gcda" -exec cp -v '{}' . \;
+  - coveralls --extension .m --include classes
