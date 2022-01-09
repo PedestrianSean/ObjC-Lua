@@ -34,7 +34,7 @@
     if( (self = [super init]) ) {
         NSMethodSignature *signature = [NSMethodSignature signatureWithObjCTypes:typesStr];
         invocation = [NSInvocation invocationWithMethodSignature:signature];
-        [invocation setSelector:sel_registerName(name)];
+            [invocation setSelector:sel_registerName(name)];
         NSUInteger num = invocation.methodSignature.numberOfArguments;
         NSMutableArray *argSizes = [NSMutableArray arrayWithCapacity:(num-2)];
         for( NSUInteger i = 2; i < num; ++i ) { // skip the first two (self & _cmd)
@@ -418,14 +418,12 @@ static inline id getObjectResult(NSInvocation *invocation) {
     LuaExportPropertyMetaData *metaData = exportedProperties[name];
     if( ! metaData || ! metaData->setter || metaData->readonly )
         return;
-#if DEBUG
     if( value && metaData->type == _C_ID ) {
         Class valueClass = [value class];
         if( valueClass != metaData->objCType && ! [valueClass isSubclassOfClass:metaData->objCType] )
             [NSException raise:NSInvalidArgumentException format:@"object of type %@ can not be safely assigned to object of type %@", NSStringFromClass(valueClass), NSStringFromClass(metaData->objCType)];
     }
-#endif
-    setArgumentAt(metaData->setter, 0, metaData->propertySize, value);
+    setArgumentAt(metaData->setter, 0, metaData->propertySize, value, 2);
     [metaData->setter invokeWithTarget:instance];
 }
 
@@ -466,7 +464,7 @@ static inline id getObjectResult(NSInvocation *invocation) {
         return nil;
 
     [args enumerateObjectsUsingBlock:^(id obj, NSUInteger idx, BOOL *stop) {
-//NSLog(@"%ld: %s", idx, [metaData->signature getArgumentTypeAtIndex:idx+2]);
+    //NSLog(@"%ld: %s", idx, [metaData->signature getArgumentTypeAtIndex:idx+2]);
         setArgumentAt(metaData->invocation, idx, [metaData->argumentSizes[idx] unsignedIntValue], obj);
     }];
     // make sure all un-passed args are nil'd out
