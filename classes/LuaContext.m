@@ -50,6 +50,7 @@ static const struct luaL_Reg luaWrapperMetaFunctions[] = {
 @interface LuaContext () {
     lua_State *L;
     NSMutableDictionary *_exportedClasses;
+    NSMutableArray *_retainedObjects;
 }
 @property (strong) id parseResult;
 @end
@@ -94,13 +95,17 @@ static const luaL_Reg loadedlibs[] = {
         lua_pop(L, 1);
 
         _exportedClasses = [NSMutableDictionary dictionary];
+        _retainedObjects = [NSMutableArray array];
     }
     return self;
 }
 
 - (void)dealloc {
-    if( L )
+    [_retainedObjects removeAllObjects];
+    [_exportedClasses removeAllObjects];
+    if( L ) {
         lua_close(L);
+    }
 }
 
 - (BOOL)parse2:(int)result error:(NSError *__autoreleasing *)error {
@@ -327,6 +332,7 @@ static const luaL_Reg loadedlibs[] = {
         }
 
         if( exportData ) {
+            [_retainedObjects addObject:object];
             _exportedClasses[clasName] = exportData;
             LuaWrapperObject *wrapper = lua_newuserdata(L, sizeof(*wrapper));
             wrapper->context = (__bridge void*)self;
