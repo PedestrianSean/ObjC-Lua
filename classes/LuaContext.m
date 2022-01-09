@@ -106,11 +106,11 @@ static const luaL_Reg loadedlibs[] = {
     int result = luaL_dostring(L, [script UTF8String]);
     if( result == LUA_OK )
         return YES;
-    if( error ) {
-        *error = [NSError errorWithDomain:LuaErrorDomain
-                                     code:result
-                                 userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Could not parse script: %s", lua_tostring(L,-1)] }];
-    }
+            if( error ) {
+                *error = [NSError errorWithDomain:LuaErrorDomain
+                                             code:result
+                                         userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Could not parse script: %s", lua_tostring(L,-1)] }];
+            }
     return NO;
 }
 
@@ -166,7 +166,7 @@ static const luaL_Reg loadedlibs[] = {
         lua_newtable(L);
         [object enumerateObjectsUsingBlock:^(id item, NSUInteger idx, BOOL *stop) {
             [self fromObjC:item];
-            lua_rawseti(L, -2, (int)idx + 1); // lua arrays start at 1, not 0
+            lua_rawseti(self->L, -2, (int)idx + 1); // lua arrays start at 1, not 0
         }];
     }
     else if( [object isKindOfClass:[NSDictionary class]] ) {
@@ -174,7 +174,7 @@ static const luaL_Reg loadedlibs[] = {
         [object enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
             [self fromObjC:key];
             [self fromObjC:obj];
-            lua_rawset(L, -3);
+            lua_rawset(self->L, -3);
         }];
     }
     else if( [object isKindOfClass:[NSValue class]] ) {
