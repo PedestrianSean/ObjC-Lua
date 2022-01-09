@@ -35,6 +35,9 @@ typedef struct LuaWrapperObject {
     void *exportData;
 } LuaWrapperObject;
 
+static const char *blockSig(id blockObj);
+static int callMethod(lua_State *L);
+
 static int luaWrapperIndex(lua_State *L);
 static int luaWrapperNewIndex(lua_State *L);
 
@@ -50,6 +53,7 @@ static const struct luaL_Reg luaWrapperMetaFunctions[] = {
 @interface LuaContext () {
     lua_State *L;
     NSMutableDictionary *_exportedClasses;
+    NSMutableArray *_exportedBlocks;
     NSMutableArray *_retainedObjects;
 }
 @property (strong) id parseResult;
@@ -95,6 +99,7 @@ static const luaL_Reg loadedlibs[] = {
         lua_pop(L, 1);
 
         _exportedClasses = [NSMutableDictionary dictionary];
+        _exportedBlocks = [NSMutableArray array];
         _retainedObjects = [NSMutableArray array];
     }
     return self;
@@ -102,6 +107,7 @@ static const luaL_Reg loadedlibs[] = {
 
 - (void)dealloc {
     [_retainedObjects removeAllObjects];
+    [_exportedBlocks removeAllObjects];
     [_exportedClasses removeAllObjects];
     if( L ) {
         lua_close(L);
@@ -345,6 +351,27 @@ static const luaL_Reg loadedlibs[] = {
         else
             return NO;
     }
+    else if( [object isKindOfClass:NSClassFromString(@"NSBlock")] ) {
+    	const char *sig = blockSig (object);
+    	const char *name = "block";
+    	LuaExportMetaData *exportData = [LuaExportMetaData createExport];
+        [exportData addAllowedMethod:name withTypes:sig];
+        if( [exportData canCallMethod:name] ) {
+            [_retainedObjects addObject:object];
+            [_exportedBlocks addObject:exportData];
+            LuaWrapperObject *wrapper = lua_newuserdata(L, sizeof(*wrapper));
+            wrapper->context = (__bridge void*)self;
+            wrapper->instance = (__bridge void*)object;
+            wrapper->exportData = (__bridge void*)exportData;
+            luaL_getmetatable(L, LuaWrapperObjectMetatableName);
+            lua_setmetatable(L, -2);
+            lua_pushlightuserdata(L, wrapper);
+            lua_pushstring(L, name);
+            lua_pushcclosure(L, callMethod, 2);
+        }
+        else
+            return NO;
+    }
     else
         return NO;
 
@@ -566,4 +593,33 @@ static int luaDumpVar(lua_State *L) {
     }
     lua_pushstring(L, [result UTF8String]);
     return 1;
+}
+
+// -------------------
+// Added 09Jan22 by @tempelorg in order to support assigning blocks as functions
+//
+struct BlockDescriptorStruct {
+    unsigned long reserved;
+    unsigned long size;
+    void *rest[1];
+};
+struct BlockStruct {
+    void *isa;
+    int flags;
+    int reserved;
+    void *invoke;
+    struct BlockDescriptorStruct *descriptor;
+};
+static const char *blockSig(id blockObj) // See https://stackoverflow.com/a/10944983/43615
+{
+    struct BlockStruct *block = (__bridge void *)blockObj;
+    struct BlockDescriptorStruct *descriptor = block->descriptor;
+    int copyDisposeFlag = 1 << 25;
+    int signatureFlag = 1 << 30;
+    assert(block->flags & signatureFlag);
+    int index = 0;
+    if (block->flags & copyDisposeFlag) {
+        index += 2;
+    }
+    return descriptor->rest[index];
 }

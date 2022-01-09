@@ -17,6 +17,7 @@
 @public
     NSInvocation *invocation;
     NSArray *argumentSizes;
+    NSUInteger skipped;
 }
 
 + (LuaExportMethodMetaData*)methodMetaDataFor:(const char*)name withTypes:(const char*)types;
@@ -33,13 +34,18 @@
 - (id)initWithMethod:(const char*)name andTypes:(const char*)typesStr {
     if( (self = [super init]) ) {
         NSMethodSignature *signature = [NSMethodSignature signatureWithObjCTypes:typesStr];
+        // if 2nd arg is not a selector, then we're dealing with a block:
+        skipped = (signature.numberOfArguments >= 2 && strcmp([signature getArgumentTypeAtIndex:1], ":") == 0) ? 2 : 1;
         invocation = [NSInvocation invocationWithMethodSignature:signature];
+        if (skipped > 1) {
             [invocation setSelector:sel_registerName(name)];
+        }
         NSUInteger num = invocation.methodSignature.numberOfArguments;
-        NSMutableArray *argSizes = [NSMutableArray arrayWithCapacity:(num-2)];
-        for( NSUInteger i = 2; i < num; ++i ) { // skip the first two (self & _cmd)
+        NSMutableArray *argSizes = [NSMutableArray arrayWithCapacity:(num-1)];
+        for( NSUInteger i = skipped; i < num; ++i ) { // skip self and _cmd
+        	const char *argType = [invocation.methodSignature getArgumentTypeAtIndex:i];
             NSUInteger size;
-            NSGetSizeAndAlignment([invocation.methodSignature getArgumentTypeAtIndex:i], &size, NULL);
+            NSGetSizeAndAlignment(argType, &size, NULL);
             [argSizes addObject:@(size)];
         }
         argumentSizes = [NSArray arrayWithArray:argSizes];
@@ -182,8 +188,8 @@
 }
 @end
 
-static inline void setArgumentAt(NSInvocation *invocation, NSUInteger idx, NSUInteger size, id obj) {
-    idx += 2; // skip self & _cmd
+static inline void setArgumentAt(NSInvocation *invocation, NSUInteger idx, NSUInteger size, id obj, NSUInteger skipped) {
+    idx += skipped; // skip self & _cmd
     static void* NullArgument = NULL;
     if( obj == [NSNull null] ) {
         [invocation setArgument:&NullArgument atIndex:idx];
@@ -465,11 +471,11 @@ static inline id getObjectResult(NSInvocation *invocation) {
 
     [args enumerateObjectsUsingBlock:^(id obj, NSUInteger idx, BOOL *stop) {
     //NSLog(@"%ld: %s", idx, [metaData->signature getArgumentTypeAtIndex:idx+2]);
-        setArgumentAt(metaData->invocation, idx, [metaData->argumentSizes[idx] unsignedIntValue], obj);
+        setArgumentAt(metaData->invocation, idx, [metaData->argumentSizes[idx] unsignedIntValue], obj, metaData->skipped);
     }];
     // make sure all un-passed args are nil'd out
     for( NSUInteger idx = [args count]; idx < [metaData->argumentSizes count]; ++idx )
-        setArgumentAt(metaData->invocation, idx, 0, [NSNull null]);
+        setArgumentAt(metaData->invocation, idx, 0, [NSNull null], metaData->skipped);
 
     [metaData->invocation invokeWithTarget:instance];
 
