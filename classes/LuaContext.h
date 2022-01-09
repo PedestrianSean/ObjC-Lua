@@ -48,12 +48,17 @@ typedef NS_ENUM(NSUInteger, LuaErrorCode) {
  `LuaContext` contains all the methods needed to parse & call Lua scripts. See the top-level overview for examples.
 
  The call:with:error:, objectForKeyedSubscript:, and setObject:forKeyedSubscript: methods will automatically translate
- between NSNull, NSNumber, NSString, NSArray, and NSDictionary types and their Lua equivelents. If you need to pass
+ between NSNull, NSNumber, NSString, NSArray, and NSDictionary types and their Lua equivalents. If you need to pass
  other object types into the context, you must use the LuaExport protocol.
 
  The context will also translate between NSValue types containing CGPoint, CGSize, CGRect, CGAffineTransform, and CATransform3D structs.
  */
 @interface LuaContext : NSObject
+
+/**
+ `parseResult` contains the single-value result from the last `parse:error:` or `parseURL:error:` invocation
+ */
+@property (readonly) id parseResult;
 
 /**
  @param script A Lua script to be parsed and added to this context

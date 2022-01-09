@@ -51,6 +51,7 @@ static const struct luaL_Reg luaWrapperMetaFunctions[] = {
     lua_State *L;
     NSMutableDictionary *_exportedClasses;
 }
+@property (strong) id parseResult;
 @end
 
 static int luaPanicked(lua_State *L) {
@@ -102,16 +103,27 @@ static const luaL_Reg loadedlibs[] = {
         lua_close(L);
 }
 
-- (BOOL)parse:(NSString *)script error:(NSError *__autoreleasing *)error {
-    int result = luaL_dostring(L, [script UTF8String]);
-    if( result == LUA_OK )
-        return YES;
+- (BOOL)parse2:(int)result error:(NSError *__autoreleasing *)error {
+    if( result == LUA_OK ) {
+    	result = lua_pcall(L, 0, 1, 0);
+        if( result == LUA_OK ) {
+            self.parseResult = toObjC(L, -1);
+        } else {
+            self.parseResult = nil;
             if( error ) {
                 *error = [NSError errorWithDomain:LuaErrorDomain
                                              code:result
                                          userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Could not parse script: %s", lua_tostring(L,-1)] }];
             }
-    return NO;
+        }
+        lua_pop(L, 1);
+    }
+    return result == LUA_OK;
+}
+
+- (BOOL)parse:(NSString *)script error:(NSError *__autoreleasing *)error {
+    int result = luaL_loadstring(L, [script UTF8String]);
+    return [self parse2:result error:error];
 }
 
 - (BOOL)parseURL:(NSURL *)url error:(NSError *__autoreleasing *)error {
@@ -122,15 +134,8 @@ static const luaL_Reg loadedlibs[] = {
                                      userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Invalid script path '%@'", url] }];
         return NO;
     }
-    int result = luaL_dofile(L, [[url path] UTF8String]);
-    if( result == LUA_OK )
-        return YES;
-    if( error ) {
-        *error = [NSError errorWithDomain:LuaErrorDomain
-                                     code:result
-                                 userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Could not parse script: %s", lua_tostring(L,-1)] }];
-    }
-    return NO;
+    int result = luaL_loadfile(L, [[url path] UTF8String]);
+    return [self parse2:result error:error];
 }
 
 - (BOOL)fromObjC:(id)object {
