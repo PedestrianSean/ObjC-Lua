@@ -134,19 +134,20 @@ static const luaL_Reg loadedlibs[] = {
                 #endif
                 _parseResult = newv;
             }
-        } else {
-            #if ! __has_feature(objc_arc)
-                [_parseResult release];
-            #endif
-            _parseResult = nil;
-            if( error ) {
-                *error = [NSError errorWithDomain:LuaErrorDomain
-                                             code:result
-                                         userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Could not parse script: %s", lua_tostring(L,-1)] }];
-            }
         }
-        lua_pop(L, 1);
     }
+    if( result != LUA_OK ) {
+        #if ! __has_feature(objc_arc)
+            [_parseResult release];
+        #endif
+        _parseResult = nil;
+        if( error ) {
+            *error = [NSError errorWithDomain:LuaErrorDomain
+                                         code:result
+                                     userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Could not parse script: %s", lua_tostring(L,-1)] }];
+        }
+    }
+    lua_pop(L, 1);
     return result == LUA_OK;
 }
 
