@@ -705,6 +705,8 @@ static inline BOOL CATransform3DEqualToTransformEpsilon(CATransform3D t1, CATran
 
 
 - (void)testLeakIssue8 {
+    // tests issue #8
+    
     ExportObjectInstanceCount = 0; @autoreleasepool {
 
     LuaContext *ctx = [LuaContext new];
@@ -718,7 +720,6 @@ static inline BOOL CATransform3DEqualToTransformEpsilon(CATransform3D t1, CATran
     ExportObject *ex = [ExportObject new];
     ctx[@"ex"] = ex;
 
-    // This leads to a leak, see Issue #8
     result = [ctx call:"setPublicPr" with:@[ @5 ] error:&error];
     NSLog(@"%d result: %@ error: %@", __LINE__, result, error);
     XCTAssert( ! result && error, @"setting string to number succeeded");

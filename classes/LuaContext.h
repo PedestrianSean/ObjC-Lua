@@ -56,9 +56,9 @@ typedef NS_ENUM(NSUInteger, LuaErrorCode) {
 @interface LuaContext : NSObject
 
 /**
- `parseResult` contains the single-value result from the last `parse:error:` or `parseURL:error:` invocation
+ @return the single-value result from the last `parse:error:` or `parseURL:error:` invocation
  */
-@property (readonly) id parseResult;
+- (id)parseResult;
 
 /**
  @param script A Lua script to be parsed and added to this context

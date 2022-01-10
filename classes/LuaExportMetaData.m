@@ -20,14 +20,14 @@
     NSUInteger skipped;
 }
 
-+ (LuaExportMethodMetaData*)methodMetaDataFor:(const char*)name withTypes:(const char*)types;
++ (LuaExportMethodMetaData*)newMethodMetaDataFor:(const char*)name withTypes:(const char*)types;
 - (id)initWithMethod:(const char*)name andTypes:(const char*)types;
 
 @end
 
 @implementation LuaExportMethodMetaData
 
-+ (LuaExportMethodMetaData*)methodMetaDataFor:(const char*)name withTypes:(const char*)types {
++ (LuaExportMethodMetaData*)newMethodMetaDataFor:(const char*)name withTypes:(const char*)types {
     return [[self alloc] initWithMethod:name andTypes:types];
 }
 
@@ -36,7 +36,12 @@
         NSMethodSignature *signature = [NSMethodSignature signatureWithObjCTypes:typesStr];
         // if 2nd arg is not a selector, then we're dealing with a block:
         skipped = (signature.numberOfArguments >= 2 && strcmp([signature getArgumentTypeAtIndex:1], ":") == 0) ? 2 : 1;
+
         invocation = [NSInvocation invocationWithMethodSignature:signature];
+        #if ! __has_feature(objc_arc)
+            [invocation retain];
+        #endif
+
         if (skipped > 1) {
             [invocation setSelector:sel_registerName(name)];
         }
@@ -48,9 +53,17 @@
             NSGetSizeAndAlignment(argType, &size, NULL);
             [argSizes addObject:@(size)];
         }
-        argumentSizes = [NSArray arrayWithArray:argSizes];
+        argumentSizes = [NSArray.alloc initWithArray:argSizes];
     }
     return self;
+}
+
+- (void)dealloc {
+    #if ! __has_feature(objc_arc)
+        [invocation release];
+        [argumentSizes release];
+        [super dealloc];
+    #endif
 }
 
 @end
@@ -65,14 +78,14 @@
     NSInvocation *setter;
 }
 
-+ (LuaExportPropertyMetaData*)propertyMetaDataFor:(NSString*)name withAttrs:(const char*)attrs;
++ (LuaExportPropertyMetaData*)newPropertyMetaDataFor:(NSString*)name withAttrs:(const char*)attrs;
 - (id)initWithProperty:(NSString*)name andAttrs:(const char*)attrs;
 
 @end
 
 @implementation LuaExportPropertyMetaData
 
-+ (LuaExportPropertyMetaData*)propertyMetaDataFor:(NSString*)name withAttrs:(const char *)attrs {
++ (LuaExportPropertyMetaData*)newPropertyMetaDataFor:(NSString*)name withAttrs:(const char *)attrs {
     return [[self alloc] initWithProperty:name andAttrs:attrs];
 }
 
@@ -370,11 +383,20 @@ static inline id getObjectResult(NSInvocation *invocation) {
 
 @implementation LuaExportMetaData
 
-+ (LuaExportMetaData*)createExport {
-    LuaExportMetaData *ud = [LuaExportMetaData new];
-    ud->exportedProperties = [NSMutableDictionary dictionary];
-    ud->exportedMethods = [NSMutableDictionary dictionary];
-    return ud;
+- (instancetype)init {
+    if ((self = [super init])) {
+        exportedProperties = [NSMutableDictionary new];
+        exportedMethods = [NSMutableDictionary new];
+    }
+    return self;
+}
+
+- (void)dealloc {
+    #if ! __has_feature(objc_arc)
+        [exportedProperties release];
+        [exportedMethods release];
+        [super dealloc];
+    #endif
 }
 
 - (NSString*)description {
@@ -386,11 +408,15 @@ static inline id getObjectResult(NSInvocation *invocation) {
 
 - (void)addAllowedProperty:(const char*)propertyName withAttrs:(const char*)attrs {
     NSString *name = [NSString stringWithUTF8String:propertyName];
-    LuaExportPropertyMetaData *metaData = [LuaExportPropertyMetaData propertyMetaDataFor:name withAttrs:attrs];
-    if( metaData )
+    LuaExportPropertyMetaData *metaData = [LuaExportPropertyMetaData newPropertyMetaDataFor:name withAttrs:attrs];
+    if( metaData ) {
         exportedProperties[name] = metaData;
-    else
+        #if ! __has_feature(objc_arc)
+            [metaData release];
+        #endif
+    } else {
         NSLog(@"not adding %s", propertyName);
+    }
 }
 
 - (BOOL)canReadProperty:(const char*)propertyName {
@@ -409,7 +435,7 @@ static inline id getObjectResult(NSInvocation *invocation) {
     return YES;
 }
 
-- (id)getProperty:(const char*)propertyName onInstance:(id)instance {
+- (id)getProperty:(const char*)propertyName onInstance:(id __unsafe_unretained)instance {
     NSString *name = [NSString stringWithUTF8String:propertyName];
     LuaExportPropertyMetaData *metaData = exportedProperties[name];
     if( ! metaData || ! metaData->getter )
@@ -419,7 +445,7 @@ static inline id getObjectResult(NSInvocation *invocation) {
     return getObjectResult(metaData->getter);
 }
 
-- (void)setProperty:(const char*)propertyName toValue:(id)value onInstance:(id)instance {
+- (void)setProperty:(const char*)propertyName toValue:(id __unsafe_unretained)value onInstance:(id __unsafe_unretained)instance {
     NSString *name = [NSString stringWithUTF8String:propertyName];
     LuaExportPropertyMetaData *metaData = exportedProperties[name];
     if( ! metaData || ! metaData->setter || metaData->readonly )
@@ -452,9 +478,13 @@ static inline id getObjectResult(NSInvocation *invocation) {
         }
     }];
 
-    LuaExportMethodMetaData *metaData = [LuaExportMethodMetaData methodMetaDataFor:methodName withTypes:types];
-    if( metaData )
+    LuaExportMethodMetaData *metaData = [LuaExportMethodMetaData newMethodMetaDataFor:methodName withTypes:types];
+    if( metaData ) {
         exportedMethods[mangled] = metaData;
+        #if ! __has_feature(objc_arc)
+            [metaData release];
+        #endif
+    }
 }
 
 - (BOOL)canCallMethod:(const char*)method {
@@ -463,7 +493,7 @@ static inline id getObjectResult(NSInvocation *invocation) {
     return (metaData && metaData->invocation);
 }
 
-- (id)callMethod:(const char*)method withArgs:(NSArray *)args onInstance:(id)instance {
+- (id)callMethod:(const char*)method withArgs:(NSArray *)args onInstance:(id __unsafe_unretained)instance {
     NSString *name = [NSString stringWithUTF8String:method];
     LuaExportMethodMetaData *metaData = exportedMethods[name];
     if( ! metaData || ! metaData->invocation )

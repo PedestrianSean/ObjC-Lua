@@ -55,8 +55,8 @@ static const struct luaL_Reg luaWrapperMetaFunctions[] = {
     NSMutableDictionary *_exportedClasses;
     NSMutableArray *_exportedBlocks;
     NSMutableArray *_retainedObjects;
+    id _parseResult;
 }
-@property (strong) id parseResult;
 @end
 
 static int luaPanicked(lua_State *L) {
@@ -98,29 +98,47 @@ static const luaL_Reg loadedlibs[] = {
         luaL_setfuncs(L, luaWrapperMetaFunctions, 0);
         lua_pop(L, 1);
 
-        _exportedClasses = [NSMutableDictionary dictionary];
-        _exportedBlocks = [NSMutableArray array];
-        _retainedObjects = [NSMutableArray array];
+        _exportedClasses = [NSMutableDictionary new];
+        _exportedBlocks = [NSMutableArray new];
+        _retainedObjects = [NSMutableArray new];
     }
     return self;
 }
 
 - (void)dealloc {
-    [_retainedObjects removeAllObjects];
-    [_exportedBlocks removeAllObjects];
-    [_exportedClasses removeAllObjects];
     if( L ) {
         lua_close(L);
     }
+    #if ! __has_feature(objc_arc)
+        [_exportedClasses release];
+        [_exportedBlocks release];
+        [_retainedObjects release];
+        [_parseResult release];
+        [super dealloc];
+    #endif
 }
+
+- (id)parseResult {
+    return _parseResult;
+}
+
 
 - (BOOL)parse2:(int)result error:(NSError *__autoreleasing *)error {
     if( result == LUA_OK ) {
     	result = lua_pcall(L, 0, 1, 0);
         if( result == LUA_OK ) {
-            self.parseResult = toObjC(L, -1);
+            id newv = toObjC(L, -1);
+            if (newv != _parseResult) {
+                #if ! __has_feature(objc_arc)
+                    [_parseResult release];
+                #endif
+                _parseResult = newv;
+            }
         } else {
-            self.parseResult = nil;
+            #if ! __has_feature(objc_arc)
+                [_parseResult release];
+            #endif
+            _parseResult = nil;
             if( error ) {
                 *error = [NSError errorWithDomain:LuaErrorDomain
                                              code:result
@@ -298,7 +316,7 @@ static const luaL_Reg loadedlibs[] = {
 
         if( ! exportData )
         {
-            exportData = [LuaExportMetaData createExport];
+            exportData = [LuaExportMetaData new];
             Protocol *exportProtocol = @protocol(LuaExport);
             for( Class clas = [object class]; clas; clas = [clas superclass] )
             {
@@ -347,14 +365,18 @@ static const luaL_Reg loadedlibs[] = {
             luaL_getmetatable(L, LuaWrapperObjectMetatableName);
             lua_setmetatable(L, -2);
             //NSLog(@"%@ adding wrapper %p with ed: %p", object, wrapper, exportData);
+            #if !__has_feature(objc_arc)
+                [exportData release];
+            #endif
         }
         else
             return NO;
     }
     else if( [object isKindOfClass:NSClassFromString(@"NSBlock")] ) {
+        BOOL retVal = NO;
     	const char *sig = blockSig (object);
     	const char *name = "block";
-    	LuaExportMetaData *exportData = [LuaExportMetaData createExport];
+    	LuaExportMetaData *exportData = [LuaExportMetaData new];
         [exportData addAllowedMethod:name withTypes:sig];
         if( [exportData canCallMethod:name] ) {
             [_retainedObjects addObject:object];
@@ -368,9 +390,12 @@ static const luaL_Reg loadedlibs[] = {
             lua_pushlightuserdata(L, wrapper);
             lua_pushstring(L, name);
             lua_pushcclosure(L, callMethod, 2);
+            retVal = YES;
         }
-        else
-            return NO;
+        #if !__has_feature(objc_arc)
+            [exportData release];
+        #endif
+        return retVal;
     }
     else
         return NO;
@@ -554,14 +579,14 @@ int luaWrapperIndex(lua_State *L) {
 int luaWrapperNewIndex(lua_State *L) {
     LuaWrapperObject *wrapper = (LuaWrapperObject*)luaL_checkudata(L, 1, LuaWrapperObjectMetatableName);
     const char *name = luaL_checkstring(L, 2);
-    id object = toObjC(L, 3);
+    id __unsafe_unretained object = toObjC(L, 3);   // `__unsafe_unretained` fixes issue #8
     //NSLog(@"setting index for %p - %s to '%@'", wrapper, name, [object description]);
     if( wrapper && name ) {
         LuaExportMetaData *ed = (__bridge LuaExportMetaData*)wrapper->exportData;
         if( [ed canWriteProperty:name] ) {
             //NSLog(@"  is writable property");
             @try {
-                id obj = (__bridge id)wrapper->instance;
+                id __unsafe_unretained obj = (__bridge id)(wrapper->instance);   // `__unsafe_unretained` fixes issue #8
                 [ed setProperty:name toValue:object onInstance:obj];
                 return 0;
             }
