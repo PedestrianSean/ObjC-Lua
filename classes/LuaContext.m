@@ -583,15 +583,15 @@ int luaWrapperIndex(lua_State *L) {
 int luaWrapperNewIndex(lua_State *L) {
     LuaWrapperObject *wrapper = (LuaWrapperObject*)luaL_checkudata(L, 1, LuaWrapperObjectMetatableName);
     const char *name = luaL_checkstring(L, 2);
-    id __unsafe_unretained object = toObjC(L, 3);   // `__unsafe_unretained` fixes issue #8
-    //NSLog(@"setting index for %p - %s to '%@'", wrapper, name, [object description]);
+    id object = toObjC(L, 3);
+    NSLog(@"setting index for %p - %s to '%@'", wrapper, name, [object description]);
     if( wrapper && name ) {
         LuaExportMetaData *ed = (__bridge LuaExportMetaData*)wrapper->exportData;
         if( [ed canWriteProperty:name] ) {
             //NSLog(@"  is writable property");
             @try {
-                id __unsafe_unretained obj = (__bridge id)(wrapper->instance);   // `__unsafe_unretained` fixes issue #8
-                [ed setProperty:name toValue:object onInstance:obj];
+                id __unsafe_unretained instance = (__bridge id)(wrapper->instance);   // `__unsafe_unretained` avoids issue #8
+                [ed setProperty:name toValue:object onInstance:instance];
                 return 0;
             }
             @catch (NSException *e) {

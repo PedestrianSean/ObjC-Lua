@@ -445,7 +445,7 @@ static inline id getObjectResult(NSInvocation *invocation) {
     return getObjectResult(metaData->getter);
 }
 
-- (void)setProperty:(const char*)propertyName toValue:(id __unsafe_unretained)value onInstance:(id __unsafe_unretained)instance {
+- (void)setProperty:(const char*)propertyName toValue:(id)value onInstance:(id __unsafe_unretained)instance {
     NSString *name = [NSString stringWithUTF8String:propertyName];
     LuaExportPropertyMetaData *metaData = exportedProperties[name];
     if( ! metaData || ! metaData->setter || metaData->readonly )
