@@ -1,7 +1,8 @@
 ObjC-Lua
 ========
 
-A simple Objective-C &lt;-> Lua bridge modeled after iOS 7's and macOS' JavaScriptCore.
+A simple Objective-C &lt;-> Lua bridge modeled after iOS 7's and macOS'
+[JavaScriptCore](https://developer.apple.com/documentation/javascriptcore).
 
 A trivial use might look like this:
 
