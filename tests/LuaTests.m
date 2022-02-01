@@ -729,4 +729,34 @@ static inline BOOL CATransform3DEqualToTransformEpsilon(CATransform3D t1, CATran
     } XCTAssert( ExportObjectInstanceCount == 0, "ExportObject leak (%s): %d", __func__, ExportObjectInstanceCount);
 }
 
+
+- (void)testIssue11 {
+    ExportObjectInstanceCount = 0; @autoreleasepool {
+
+    LuaContext *ctx = [LuaContext new];
+
+    NSError *error = nil;
+
+    NSString *script =
+@"storedObj = null"
+" function storeObj (obj) storedObj = obj end"
+" function returnObj () return storedObj end";
+    [ctx parse:script error:&error];
+    XCTAssert( ! error, @"failed to load script: %@", error);
+
+    id result;
+    ExportObject *ex = [ExportObject new];
+
+    [ctx call:"storeObj" with:@[ex] error:&error];
+    NSLog(@"%d error: %@", __LINE__, error);
+    XCTAssert( ! error, @"failed with: %@", error);
+
+    result = [ctx call:"returnObj" with:nil error:&error];
+    NSLog(@"%d result: %@ error: %@", __LINE__, result, error);
+    XCTAssert( ! error, @"failed with: %@", error);
+    XCTAssert( ex == result, @"result is wrong");
+
+    } XCTAssert( ExportObjectInstanceCount == 0, "ExportObject leak (%s): %d", __func__, ExportObjectInstanceCount);
+}
+
 @end

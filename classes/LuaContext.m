@@ -405,7 +405,8 @@ static const luaL_Reg loadedlibs[] = {
 }
 
 static inline id toObjC(lua_State *L, int index) {
-    switch( lua_type(L, index) ) {
+	int lt = lua_type(L, index);
+    switch( lt ) {
         case LUA_TNIL:
             return nil;
         case LUA_TNUMBER:
@@ -417,6 +418,11 @@ static inline id toObjC(lua_State *L, int index) {
         }
         case LUA_TSTRING:
             return [NSString stringWithUTF8String:lua_tostring(L, index)];
+		case LUA_TUSERDATA:
+		{
+   		    LuaWrapperObject *wrapper = (LuaWrapperObject*)lua_touserdata(L, index);
+			return (__bridge id)wrapper->instance;
+		}
         case LUA_TTABLE:
         {
             BOOL isDict = NO;
@@ -467,7 +473,6 @@ static inline id toObjC(lua_State *L, int index) {
             return result;
         }
         case LUA_TFUNCTION:
-        case LUA_TUSERDATA:
         case LUA_TTHREAD:
         case LUA_TLIGHTUSERDATA:
         default:
