@@ -78,7 +78,7 @@ typedef NS_ENUM(NSUInteger, LuaErrorCode) {
  @param error will only be set if this method returns `NO`
  @return `YES` on success, otherwise `NO` and `error` will be set
  */
-- (id)call:(char*)name with:(NSArray*)args error:(out NSError**)error;
+- (id)call:(const char*)name with:(NSArray*)args error:(out NSError**)error;
 
 /**
  @param key The name of a Lua variable to retreive from this context

@@ -97,7 +97,7 @@
         NSUInteger idx;
 
         // find the type
-        idx = [propAttrs indexOfObjectPassingTest:^BOOL(NSString *str, NSUInteger idx, BOOL *stop) {
+        idx = [propAttrs indexOfObjectPassingTest:^BOOL(NSString *str, NSUInteger idx2, BOOL *stop) {
             if( [str length] > 1 && [str characterAtIndex:0] == 'T' )
                 *stop = YES;
             return *stop;
@@ -153,7 +153,7 @@
         }
 
         // find the getter
-        idx = [propAttrs indexOfObjectPassingTest:^BOOL(NSString *str, NSUInteger idx, BOOL *stop) {
+        idx = [propAttrs indexOfObjectPassingTest:^BOOL(NSString *str, NSUInteger idx2, BOOL *stop) {
             if( [str length] > 1 && [str characterAtIndex:0]  == 'G' )
                 *stop = YES;
             return *stop;
@@ -171,7 +171,7 @@
 
         if( ! readonly ) {
             // find the setter
-            idx = [propAttrs indexOfObjectPassingTest:^BOOL(NSString *str, NSUInteger idx, BOOL *stop) {
+            idx = [propAttrs indexOfObjectPassingTest:^BOOL(NSString *str, NSUInteger idx2, BOOL *stop) {
                 if( [str length] > 1 && [str characterAtIndex:0]  == 'S' )
                     *stop = YES;
                 return *stop;

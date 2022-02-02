@@ -460,11 +460,11 @@ static inline id toObjC(lua_State *L, int index) {
                 
                 lua_pushnil(L);  /* first key */
                 while( lua_next(L, -2) ) {
-                    int index = lua_tonumber(L, -2) - 1;
+                    int index2 = (int)lua_tonumber(L, -2) - 1;	// shouldn't this be rather `lua_tointeger`?
                     id object = toObjC(L, -1);
                     if( ! object )
                         object = [NSNull null];
-                    result[index] = object;
+                    result[index2] = object;
                     lua_pop(L, 1);
                 }
             }
@@ -480,7 +480,7 @@ static inline id toObjC(lua_State *L, int index) {
     }
 }
 
-- (id)call:(char*)name with:(NSArray *)args error:(NSError *__autoreleasing *)error {
+- (id)call:(const char*)name with:(NSArray *)args error:(NSError *__autoreleasing *)error {
     lua_getglobal(L, name);
     if( lua_type(L, -1) != LUA_TFUNCTION ) {
         if( error )
