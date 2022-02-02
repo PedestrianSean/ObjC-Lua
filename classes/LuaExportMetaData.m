@@ -256,7 +256,9 @@ static inline void setArgumentAt(NSInvocation *invocation, NSUInteger idx, NSUIn
             SET_BUFFER(unsigned long long, unsignedLongLongValue);
             break;
         case _C_ID:
-            *(id __unsafe_unretained*)buffer = obj;
+        	if (size >= sizeof(id)) {
+            	*(id __unsafe_unretained*)buffer = obj;
+			}
             break;
         case _C_STRUCT_B:
         {
