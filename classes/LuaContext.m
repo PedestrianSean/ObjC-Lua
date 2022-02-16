@@ -173,6 +173,9 @@ static const luaL_Reg loadedlibs[] = {
         lua_pushnil(L);
     else if( [object isKindOfClass:[NSString class]] )
         lua_pushstring(L, [object UTF8String]);
+    else if( [object isKindOfClass:[NSDate class]] )
+    	// Lua uses epoch numbers
+        lua_pushnumber(L, [(NSDate*)object timeIntervalSince1970]);
     else if( [object isKindOfClass:[NSNumber class]] ) {
         switch( [object objCType][0] ) {
             case _C_FLT:
