@@ -362,6 +362,8 @@ static inline id getObjectResult(NSInvocation *invocation) {
             GET_RESULT_PRIMITIVE(long long);
         case _C_ULNG_LNG:
             GET_RESULT_PRIMITIVE(unsigned long long);
+        case _C_BOOL:
+            GET_RESULT_PRIMITIVE(bool);
         case _C_ID:
         {
             __unsafe_unretained id temp = nil;
