@@ -35,6 +35,9 @@ typedef struct LuaWrapperObject {
     void *exportData;
 } LuaWrapperObject;
 
+static const char *blockSig(id blockObj);
+static int callMethod(lua_State *L);
+
 static int luaWrapperIndex(lua_State *L);
 static int luaWrapperNewIndex(lua_State *L);
 
@@ -50,6 +53,9 @@ static const struct luaL_Reg luaWrapperMetaFunctions[] = {
 @interface LuaContext () {
     lua_State *L;
     NSMutableDictionary *_exportedClasses;
+    NSMutableArray *_exportedBlocks;
+    NSMutableArray *_retainedObjects;
+    id _parseResult;
 }
 @end
 
@@ -92,26 +98,62 @@ static const luaL_Reg loadedlibs[] = {
         luaL_setfuncs(L, luaWrapperMetaFunctions, 0);
         lua_pop(L, 1);
 
-        _exportedClasses = [NSMutableDictionary dictionary];
+        _exportedClasses = [NSMutableDictionary new];
+        _exportedBlocks = [NSMutableArray new];
+        _retainedObjects = [NSMutableArray new];
     }
     return self;
 }
 
 - (void)dealloc {
-    if( L )
+    if( L ) {
         lua_close(L);
+    }
+    #if ! __has_feature(objc_arc)
+        [_exportedClasses release];
+        [_exportedBlocks release];
+        [_retainedObjects release];
+        [_parseResult release];
+        [super dealloc];
+    #endif
+}
+
+- (id)parseResult {
+    return _parseResult;
+}
+
+
+- (BOOL)parse2:(int)result error:(NSError *__autoreleasing *)error {
+    if( result == LUA_OK ) {
+    	result = lua_pcall(L, 0, 1, 0);
+        if( result == LUA_OK ) {
+            id newv = toObjC(L, -1);
+            if (newv != _parseResult) {
+                #if ! __has_feature(objc_arc)
+                    [_parseResult release];
+                #endif
+                _parseResult = newv;
+            }
+        }
+    }
+    if( result != LUA_OK ) {
+        #if ! __has_feature(objc_arc)
+            [_parseResult release];
+        #endif
+        _parseResult = nil;
+        if( error ) {
+            *error = [NSError errorWithDomain:LuaErrorDomain
+                                         code:result
+                                     userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Could not parse script: %s", lua_tostring(L,-1)] }];
+        }
+    }
+    lua_pop(L, 1);
+    return result == LUA_OK;
 }
 
 - (BOOL)parse:(NSString *)script error:(NSError *__autoreleasing *)error {
-    int result = luaL_dostring(L, [script UTF8String]);
-    if( result == LUA_OK )
-        return YES;
-    if( error ) {
-        *error = [NSError errorWithDomain:LuaErrorDomain
-                                     code:result
-                                 userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Could not parse script: %s", lua_tostring(L,-1)] }];
-    }
-    return NO;
+    int result = luaL_loadstring(L, [script UTF8String]);
+    return [self parse2:result error:error];
 }
 
 - (BOOL)parseURL:(NSURL *)url error:(NSError *__autoreleasing *)error {
@@ -122,15 +164,8 @@ static const luaL_Reg loadedlibs[] = {
                                      userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Invalid script path '%@'", url] }];
         return NO;
     }
-    int result = luaL_dofile(L, [[url path] UTF8String]);
-    if( result == LUA_OK )
-        return YES;
-    if( error ) {
-        *error = [NSError errorWithDomain:LuaErrorDomain
-                                     code:result
-                                 userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Could not parse script: %s", lua_tostring(L,-1)] }];
-    }
-    return NO;
+    int result = luaL_loadfile(L, [[url path] UTF8String]);
+    return [self parse2:result error:error];
 }
 
 - (BOOL)fromObjC:(id)object {
@@ -138,6 +173,9 @@ static const luaL_Reg loadedlibs[] = {
         lua_pushnil(L);
     else if( [object isKindOfClass:[NSString class]] )
         lua_pushstring(L, [object UTF8String]);
+    else if( [object isKindOfClass:[NSDate class]] )
+    	// Lua uses epoch numbers
+        lua_pushnumber(L, [(NSDate*)object timeIntervalSince1970]);
     else if( [object isKindOfClass:[NSNumber class]] ) {
         switch( [object objCType][0] ) {
             case _C_FLT:
@@ -166,7 +204,7 @@ static const luaL_Reg loadedlibs[] = {
         lua_newtable(L);
         [object enumerateObjectsUsingBlock:^(id item, NSUInteger idx, BOOL *stop) {
             [self fromObjC:item];
-            lua_rawseti(L, -2, (int)idx + 1); // lua arrays start at 1, not 0
+            lua_rawseti(self->L, -2, (int)idx + 1); // lua arrays start at 1, not 0
         }];
     }
     else if( [object isKindOfClass:[NSDictionary class]] ) {
@@ -174,7 +212,7 @@ static const luaL_Reg loadedlibs[] = {
         [object enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
             [self fromObjC:key];
             [self fromObjC:obj];
-            lua_rawset(L, -3);
+            lua_rawset(self->L, -3);
         }];
     }
     else if( [object isKindOfClass:[NSValue class]] ) {
@@ -282,7 +320,7 @@ static const luaL_Reg loadedlibs[] = {
 
         if( ! exportData )
         {
-            exportData = [LuaExportMetaData createExport];
+            exportData = [LuaExportMetaData new];
             Protocol *exportProtocol = @protocol(LuaExport);
             for( Class clas = [object class]; clas; clas = [clas superclass] )
             {
@@ -322,6 +360,7 @@ static const luaL_Reg loadedlibs[] = {
         }
 
         if( exportData ) {
+            [_retainedObjects addObject:object];
             _exportedClasses[clasName] = exportData;
             LuaWrapperObject *wrapper = lua_newuserdata(L, sizeof(*wrapper));
             wrapper->context = (__bridge void*)self;
@@ -330,9 +369,37 @@ static const luaL_Reg loadedlibs[] = {
             luaL_getmetatable(L, LuaWrapperObjectMetatableName);
             lua_setmetatable(L, -2);
             //NSLog(@"%@ adding wrapper %p with ed: %p", object, wrapper, exportData);
+            #if !__has_feature(objc_arc)
+                [exportData release];
+            #endif
         }
         else
             return NO;
+    }
+    else if( [object isKindOfClass:NSClassFromString(@"NSBlock")] ) {
+        BOOL retVal = NO;
+    	const char *sig = blockSig (object);
+    	const char *name = "block";
+    	LuaExportMetaData *exportData = [LuaExportMetaData new];
+        [exportData addAllowedMethod:name withTypes:sig];
+        if( [exportData canCallMethod:name] ) {
+            [_retainedObjects addObject:object];
+            [_exportedBlocks addObject:exportData];
+            LuaWrapperObject *wrapper = lua_newuserdata(L, sizeof(*wrapper));
+            wrapper->context = (__bridge void*)self;
+            wrapper->instance = (__bridge void*)object;
+            wrapper->exportData = (__bridge void*)exportData;
+            luaL_getmetatable(L, LuaWrapperObjectMetatableName);
+            lua_setmetatable(L, -2);
+            lua_pushlightuserdata(L, wrapper);
+            lua_pushstring(L, name);
+            lua_pushcclosure(L, callMethod, 2);
+            retVal = YES;
+        }
+        #if !__has_feature(objc_arc)
+            [exportData release];
+        #endif
+        return retVal;
     }
     else
         return NO;
@@ -341,15 +408,24 @@ static const luaL_Reg loadedlibs[] = {
 }
 
 static inline id toObjC(lua_State *L, int index) {
-    switch( lua_type(L, index) ) {
+	int lt = lua_type(L, index);
+    switch( lt ) {
         case LUA_TNIL:
             return nil;
         case LUA_TNUMBER:
             return @(lua_tonumber(L, index));
         case LUA_TBOOLEAN:
-            return @(lua_tonumber(L, index) > 0);
+        {
+            int v = lua_toboolean(L, index);
+            return v ? @YES : @NO;
+        }
         case LUA_TSTRING:
             return [NSString stringWithUTF8String:lua_tostring(L, index)];
+		case LUA_TUSERDATA:
+		{
+   		    LuaWrapperObject *wrapper = (LuaWrapperObject*)lua_touserdata(L, index);
+			return (__bridge id)wrapper->instance;
+		}
         case LUA_TTABLE:
         {
             BOOL isDict = NO;
@@ -387,11 +463,11 @@ static inline id toObjC(lua_State *L, int index) {
                 
                 lua_pushnil(L);  /* first key */
                 while( lua_next(L, -2) ) {
-                    int index = lua_tonumber(L, -2) - 1;
+                    int index2 = (int)lua_tonumber(L, -2) - 1;	// shouldn't this be rather `lua_tointeger`?
                     id object = toObjC(L, -1);
                     if( ! object )
                         object = [NSNull null];
-                    result[index] = object;
+                    result[index2] = object;
                     lua_pop(L, 1);
                 }
             }
@@ -400,7 +476,6 @@ static inline id toObjC(lua_State *L, int index) {
             return result;
         }
         case LUA_TFUNCTION:
-        case LUA_TUSERDATA:
         case LUA_TTHREAD:
         case LUA_TLIGHTUSERDATA:
         default:
@@ -408,7 +483,7 @@ static inline id toObjC(lua_State *L, int index) {
     }
 }
 
-- (id)call:(char*)name with:(NSArray *)args error:(NSError *__autoreleasing *)error {
+- (id)call:(const char*)name with:(NSArray *)args error:(NSError *__autoreleasing *)error {
     lua_getglobal(L, name);
     if( lua_type(L, -1) != LUA_TFUNCTION ) {
         if( error )
@@ -523,8 +598,8 @@ int luaWrapperNewIndex(lua_State *L) {
         if( [ed canWriteProperty:name] ) {
             //NSLog(@"  is writable property");
             @try {
-                id obj = (__bridge id)wrapper->instance;
-                [ed setProperty:name toValue:object onInstance:obj];
+                id __unsafe_unretained instance = (__bridge id)(wrapper->instance);   // `__unsafe_unretained` avoids issue #8
+                [ed setProperty:name toValue:object onInstance:instance];
                 return 0;
             }
             @catch (NSException *e) {
@@ -555,4 +630,33 @@ static int luaDumpVar(lua_State *L) {
     }
     lua_pushstring(L, [result UTF8String]);
     return 1;
+}
+
+// -------------------
+// Added 09Jan22 by @tempelorg in order to support assigning blocks as functions
+//
+struct BlockDescriptorStruct {
+    unsigned long reserved;
+    unsigned long size;
+    void *rest[1];
+};
+struct BlockStruct {
+    void *isa;
+    int flags;
+    int reserved;
+    void *invoke;
+    struct BlockDescriptorStruct *descriptor;
+};
+static const char *blockSig(id blockObj) // See https://stackoverflow.com/a/10944983/43615
+{
+    struct BlockStruct *block = (__bridge void *)blockObj;
+    struct BlockDescriptorStruct *descriptor = block->descriptor;
+    int copyDisposeFlag = 1 << 25;
+    int signatureFlag = 1 << 30;
+    assert(block->flags & signatureFlag);
+    int index = 0;
+    if (block->flags & copyDisposeFlag) {
+        index += 2;
+    }
+    return descriptor->rest[index];
 }

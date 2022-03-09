@@ -17,34 +17,53 @@
 @public
     NSInvocation *invocation;
     NSArray *argumentSizes;
+    NSUInteger skipped;
 }
 
-+ (LuaExportMethodMetaData*)methodMetaDataFor:(const char*)name withTypes:(const char*)types;
++ (LuaExportMethodMetaData*)newMethodMetaDataFor:(const char*)name withTypes:(const char*)types;
 - (id)initWithMethod:(const char*)name andTypes:(const char*)types;
 
 @end
 
 @implementation LuaExportMethodMetaData
 
-+ (LuaExportMethodMetaData*)methodMetaDataFor:(const char*)name withTypes:(const char*)types {
++ (LuaExportMethodMetaData*)newMethodMetaDataFor:(const char*)name withTypes:(const char*)types {
     return [[self alloc] initWithMethod:name andTypes:types];
 }
 
 - (id)initWithMethod:(const char*)name andTypes:(const char*)typesStr {
     if( (self = [super init]) ) {
         NSMethodSignature *signature = [NSMethodSignature signatureWithObjCTypes:typesStr];
+        // if 2nd arg is not a selector, then we're dealing with a block:
+        skipped = (signature.numberOfArguments >= 2 && strcmp([signature getArgumentTypeAtIndex:1], ":") == 0) ? 2 : 1;
+
         invocation = [NSInvocation invocationWithMethodSignature:signature];
-        [invocation setSelector:sel_registerName(name)];
+        #if ! __has_feature(objc_arc)
+            [invocation retain];
+        #endif
+
+        if (skipped > 1) {
+            [invocation setSelector:sel_registerName(name)];
+        }
         NSUInteger num = invocation.methodSignature.numberOfArguments;
-        NSMutableArray *argSizes = [NSMutableArray arrayWithCapacity:(num-2)];
-        for( NSUInteger i = 2; i < num; ++i ) { // skip the first two (self & _cmd)
+        NSMutableArray *argSizes = [NSMutableArray arrayWithCapacity:(num-1)];
+        for( NSUInteger i = skipped; i < num; ++i ) { // skip self and _cmd
+        	const char *argType = [invocation.methodSignature getArgumentTypeAtIndex:i];
             NSUInteger size;
-            NSGetSizeAndAlignment([invocation.methodSignature getArgumentTypeAtIndex:i], &size, NULL);
+            NSGetSizeAndAlignment(argType, &size, NULL);
             [argSizes addObject:@(size)];
         }
-        argumentSizes = [NSArray arrayWithArray:argSizes];
+        argumentSizes = [NSArray.alloc initWithArray:argSizes];
     }
     return self;
+}
+
+- (void)dealloc {
+    #if ! __has_feature(objc_arc)
+        [invocation release];
+        [argumentSizes release];
+        [super dealloc];
+    #endif
 }
 
 @end
@@ -59,14 +78,14 @@
     NSInvocation *setter;
 }
 
-+ (LuaExportPropertyMetaData*)propertyMetaDataFor:(NSString*)name withAttrs:(const char*)attrs;
++ (LuaExportPropertyMetaData*)newPropertyMetaDataFor:(NSString*)name withAttrs:(const char*)attrs;
 - (id)initWithProperty:(NSString*)name andAttrs:(const char*)attrs;
 
 @end
 
 @implementation LuaExportPropertyMetaData
 
-+ (LuaExportPropertyMetaData*)propertyMetaDataFor:(NSString*)name withAttrs:(const char *)attrs {
++ (LuaExportPropertyMetaData*)newPropertyMetaDataFor:(NSString*)name withAttrs:(const char *)attrs {
     return [[self alloc] initWithProperty:name andAttrs:attrs];
 }
 
@@ -78,7 +97,7 @@
         NSUInteger idx;
 
         // find the type
-        idx = [propAttrs indexOfObjectPassingTest:^BOOL(NSString *str, NSUInteger idx, BOOL *stop) {
+        idx = [propAttrs indexOfObjectPassingTest:^BOOL(NSString *str, NSUInteger idx2, BOOL *stop) {
             if( [str length] > 1 && [str characterAtIndex:0] == 'T' )
                 *stop = YES;
             return *stop;
@@ -134,7 +153,7 @@
         }
 
         // find the getter
-        idx = [propAttrs indexOfObjectPassingTest:^BOOL(NSString *str, NSUInteger idx, BOOL *stop) {
+        idx = [propAttrs indexOfObjectPassingTest:^BOOL(NSString *str, NSUInteger idx2, BOOL *stop) {
             if( [str length] > 1 && [str characterAtIndex:0]  == 'G' )
                 *stop = YES;
             return *stop;
@@ -152,7 +171,7 @@
 
         if( ! readonly ) {
             // find the setter
-            idx = [propAttrs indexOfObjectPassingTest:^BOOL(NSString *str, NSUInteger idx, BOOL *stop) {
+            idx = [propAttrs indexOfObjectPassingTest:^BOOL(NSString *str, NSUInteger idx2, BOOL *stop) {
                 if( [str length] > 1 && [str characterAtIndex:0]  == 'S' )
                     *stop = YES;
                 return *stop;
@@ -182,8 +201,8 @@
 }
 @end
 
-static inline void setArgumentAt(NSInvocation *invocation, NSUInteger idx, NSUInteger size, id obj) {
-    idx += 2; // skip self & _cmd
+static inline void setArgumentAt(NSInvocation *invocation, NSUInteger idx, NSUInteger size, id obj, NSUInteger skipped) {
+    idx += skipped; // skip self & _cmd
     static void* NullArgument = NULL;
     if( obj == [NSNull null] ) {
         [invocation setArgument:&NullArgument atIndex:idx];
@@ -237,7 +256,9 @@ static inline void setArgumentAt(NSInvocation *invocation, NSUInteger idx, NSUIn
             SET_BUFFER(unsigned long long, unsignedLongLongValue);
             break;
         case _C_ID:
-            *(id __unsafe_unretained*)buffer = obj;
+        	if (size >= sizeof(id)) {
+            	*(id __unsafe_unretained*)buffer = obj;
+			}
             break;
         case _C_STRUCT_B:
         {
@@ -341,6 +362,8 @@ static inline id getObjectResult(NSInvocation *invocation) {
             GET_RESULT_PRIMITIVE(long long);
         case _C_ULNG_LNG:
             GET_RESULT_PRIMITIVE(unsigned long long);
+        case _C_BOOL:
+            GET_RESULT_PRIMITIVE(bool);
         case _C_ID:
         {
             __unsafe_unretained id temp = nil;
@@ -364,11 +387,20 @@ static inline id getObjectResult(NSInvocation *invocation) {
 
 @implementation LuaExportMetaData
 
-+ (LuaExportMetaData*)createExport {
-    LuaExportMetaData *ud = [LuaExportMetaData new];
-    ud->exportedProperties = [NSMutableDictionary dictionary];
-    ud->exportedMethods = [NSMutableDictionary dictionary];
-    return ud;
+- (instancetype)init {
+    if ((self = [super init])) {
+        exportedProperties = [NSMutableDictionary new];
+        exportedMethods = [NSMutableDictionary new];
+    }
+    return self;
+}
+
+- (void)dealloc {
+    #if ! __has_feature(objc_arc)
+        [exportedProperties release];
+        [exportedMethods release];
+        [super dealloc];
+    #endif
 }
 
 - (NSString*)description {
@@ -380,11 +412,15 @@ static inline id getObjectResult(NSInvocation *invocation) {
 
 - (void)addAllowedProperty:(const char*)propertyName withAttrs:(const char*)attrs {
     NSString *name = [NSString stringWithUTF8String:propertyName];
-    LuaExportPropertyMetaData *metaData = [LuaExportPropertyMetaData propertyMetaDataFor:name withAttrs:attrs];
-    if( metaData )
+    LuaExportPropertyMetaData *metaData = [LuaExportPropertyMetaData newPropertyMetaDataFor:name withAttrs:attrs];
+    if( metaData ) {
         exportedProperties[name] = metaData;
-    else
+        #if ! __has_feature(objc_arc)
+            [metaData release];
+        #endif
+    } else {
         NSLog(@"not adding %s", propertyName);
+    }
 }
 
 - (BOOL)canReadProperty:(const char*)propertyName {
@@ -403,7 +439,7 @@ static inline id getObjectResult(NSInvocation *invocation) {
     return YES;
 }
 
-- (id)getProperty:(const char*)propertyName onInstance:(id)instance {
+- (id)getProperty:(const char*)propertyName onInstance:(id __unsafe_unretained)instance {
     NSString *name = [NSString stringWithUTF8String:propertyName];
     LuaExportPropertyMetaData *metaData = exportedProperties[name];
     if( ! metaData || ! metaData->getter )
@@ -413,19 +449,17 @@ static inline id getObjectResult(NSInvocation *invocation) {
     return getObjectResult(metaData->getter);
 }
 
-- (void)setProperty:(const char*)propertyName toValue:(id)value onInstance:(id)instance {
+- (void)setProperty:(const char*)propertyName toValue:(id)value onInstance:(id __unsafe_unretained)instance {
     NSString *name = [NSString stringWithUTF8String:propertyName];
     LuaExportPropertyMetaData *metaData = exportedProperties[name];
     if( ! metaData || ! metaData->setter || metaData->readonly )
         return;
-#if DEBUG
     if( value && metaData->type == _C_ID ) {
         Class valueClass = [value class];
         if( valueClass != metaData->objCType && ! [valueClass isSubclassOfClass:metaData->objCType] )
             [NSException raise:NSInvalidArgumentException format:@"object of type %@ can not be safely assigned to object of type %@", NSStringFromClass(valueClass), NSStringFromClass(metaData->objCType)];
     }
-#endif
-    setArgumentAt(metaData->setter, 0, metaData->propertySize, value);
+    setArgumentAt(metaData->setter, 0, metaData->propertySize, value, 2);
     [metaData->setter invokeWithTarget:instance];
 }
 
@@ -448,9 +482,13 @@ static inline id getObjectResult(NSInvocation *invocation) {
         }
     }];
 
-    LuaExportMethodMetaData *metaData = [LuaExportMethodMetaData methodMetaDataFor:methodName withTypes:types];
-    if( metaData )
+    LuaExportMethodMetaData *metaData = [LuaExportMethodMetaData newMethodMetaDataFor:methodName withTypes:types];
+    if( metaData ) {
         exportedMethods[mangled] = metaData;
+        #if ! __has_feature(objc_arc)
+            [metaData release];
+        #endif
+    }
 }
 
 - (BOOL)canCallMethod:(const char*)method {
@@ -459,19 +497,19 @@ static inline id getObjectResult(NSInvocation *invocation) {
     return (metaData && metaData->invocation);
 }
 
-- (id)callMethod:(const char*)method withArgs:(NSArray *)args onInstance:(id)instance {
+- (id)callMethod:(const char*)method withArgs:(NSArray *)args onInstance:(id __unsafe_unretained)instance {
     NSString *name = [NSString stringWithUTF8String:method];
     LuaExportMethodMetaData *metaData = exportedMethods[name];
     if( ! metaData || ! metaData->invocation )
         return nil;
 
     [args enumerateObjectsUsingBlock:^(id obj, NSUInteger idx, BOOL *stop) {
-//NSLog(@"%ld: %s", idx, [metaData->signature getArgumentTypeAtIndex:idx+2]);
-        setArgumentAt(metaData->invocation, idx, [metaData->argumentSizes[idx] unsignedIntValue], obj);
+    //NSLog(@"%ld: %s", idx, [metaData->signature getArgumentTypeAtIndex:idx+2]);
+        setArgumentAt(metaData->invocation, idx, [metaData->argumentSizes[idx] unsignedIntValue], obj, metaData->skipped);
     }];
     // make sure all un-passed args are nil'd out
     for( NSUInteger idx = [args count]; idx < [metaData->argumentSizes count]; ++idx )
-        setArgumentAt(metaData->invocation, idx, 0, [NSNull null]);
+        setArgumentAt(metaData->invocation, idx, 0, [NSNull null], metaData->skipped);
 
     [metaData->invocation invokeWithTarget:instance];
 

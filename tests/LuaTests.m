@@ -95,14 +95,21 @@ static inline NSString *StringFromCATransform3D(const CATransform3D xform) {
             xform.m41, xform.m42, xform.m43, xform.m44 ];
 }
 
+static int ExportObjectInstanceCount = 0;    // See https://github.com/PedestrianSean/ObjC-Lua/issues/2
+
 @implementation ExportObject
 
 - (id)init {
     if( (self = [super init]) ) {
         _privateString = @"privateStr";
         _publicString = @"publicStr";
+        ExportObjectInstanceCount += 1;
     }
     return self;
+}
+
+- (void)dealloc {
+    ExportObjectInstanceCount -= 1;
 }
 
 - (NSString*)privateMethod {
@@ -262,6 +269,8 @@ static inline NSArray* arrayFromCGAffineTransform(const CGAffineTransform xform)
 @implementation LuaTests
 
 - (void)testValue {
+    ExportObjectInstanceCount = 0; @autoreleasepool {
+
     LuaContext *ctx = [LuaContext new];
 
     NSError *error = nil;
@@ -301,6 +310,8 @@ static inline NSArray* arrayFromCGAffineTransform(const CGAffineTransform xform)
     XCTAssert( ! error, @"failed to run say: %@", error);
     NSLog(@"say returned: %@", result);
     XCTAssert( [result[@"a"] intValue] == 3 && [result[@"b"] intValue] == 2 && [result[@"c"] intValue] == 1, @"result != 'string'");
+
+    } XCTAssert( ExportObjectInstanceCount == 0, "ExportObject leak (%s): %d", __func__, ExportObjectInstanceCount);
 }
 
 static inline BOOL CGAffineTransformEqualToTransformEpsilon(CGAffineTransform t1, CGAffineTransform t2) {
@@ -334,6 +345,8 @@ static inline BOOL CATransform3DEqualToTransformEpsilon(CATransform3D t1, CATran
 }
 
 - (void)testExport {
+    ExportObjectInstanceCount = 0; @autoreleasepool {
+
     LuaContext *ctx = [LuaContext new];
 
     NSError *error = nil;
@@ -398,6 +411,7 @@ static inline BOOL CATransform3DEqualToTransformEpsilon(CATransform3D t1, CATran
     XCTAssert( ! error, @"failed with: %@", error);
     XCTAssert( [result isEqualToString:ex.publicString], @"result is wrong");
 
+    // This leads to a leak, see Issue #8
     result = [ctx call:"setPublicPr" with:@[ @5 ] error:&error];
     NSLog(@"%d result: %@ error: %@", __LINE__, result, error);
     XCTAssert( ! result && error, @"setting string to number succeeded");
@@ -408,9 +422,13 @@ static inline BOOL CATransform3DEqualToTransformEpsilon(CATransform3D t1, CATran
     NSLog(@"%d result: %@ error: %@", __LINE__, result, error);
     XCTAssert( ! error, @"failed with: %@", error);
     XCTAssert( [result isEqualToString:ex.publicString], @"result is wrong");
+
+    } // triggers Issue #8: XCTAssert( ExportObjectInstanceCount == 0, "ExportObject leak (%s): %d", __func__, ExportObjectInstanceCount);
 }
 
 - (void)testComplexType {
+    ExportObjectInstanceCount = 0; @autoreleasepool {
+    
     LuaContext *ctx = [LuaContext new];
 
     NSError *error = nil;
@@ -466,9 +484,13 @@ static inline BOOL CATransform3DEqualToTransformEpsilon(CATransform3D t1, CATran
     NSLog(@"%d result: %@ expected: %@ error: %@", __LINE__, result, StringFromCATransform3D(CATransform3DIdentity), error);
     CATransform3D xform3d = CATransform3DFromArray(result);
     XCTAssert( CATransform3DEqualToTransformEpsilon(CATransform3DIdentity, xform3d) && ! error, @"failed with: %@", error);
+
+    } XCTAssert( ExportObjectInstanceCount == 0, "ExportObject leak (%s): %d", __func__, ExportObjectInstanceCount);
 }
 
 - (void)testInheritance {
+    ExportObjectInstanceCount = 0; @autoreleasepool {
+
     LuaContext *ctx = [LuaContext new];
 
     NSError *error = nil;
@@ -575,6 +597,7 @@ static inline BOOL CATransform3DEqualToTransformEpsilon(CATransform3D t1, CATran
     XCTAssert( ! error, @"failed with: %@", error);
     XCTAssert( [result isEqualToString:ex.publicString], @"result is wrong");
 
+    // This leads to a leak, see Issue #8
     result = [ctx call:"setPublicPr" with:@[ @5 ] error:&error];
     NSLog(@"%d result: %@ error: %@", __LINE__, result, error);
     XCTAssert( ! result && error, @"setting string to number succeeded");
@@ -602,6 +625,7 @@ static inline BOOL CATransform3DEqualToTransformEpsilon(CATransform3D t1, CATran
     XCTAssert( ! error, @"failed with: %@", error);
     XCTAssert( [result isEqualToString:ex.publicString2], @"result is wrong");
 
+    // This leads to a leak, see Issue #8
     result = [ctx call:"setPublicPr2" with:@[ @6 ] error:&error];
     NSLog(@"%d result: %@ error: %@", __LINE__, result, error);
     XCTAssert( ! result && error, @"setting string to number succeeded");
@@ -612,9 +636,13 @@ static inline BOOL CATransform3DEqualToTransformEpsilon(CATransform3D t1, CATran
     NSLog(@"%d result: %@ error: %@", __LINE__, result, error);
     XCTAssert( ! error, @"failed with: %@", error);
     XCTAssert( [result isEqualToString:ex.publicString2], @"result is wrong");
+
+    } // triggers Issue #8: XCTAssert( ExportObjectInstanceCount == 0, "ExportObject leak (%s): %d", __func__, ExportObjectInstanceCount);
 }
 
 - (void)testPrint {
+    ExportObjectInstanceCount = 0; @autoreleasepool {
+
     LuaContext *ctx = [LuaContext new];
 
     NSError *error = nil;
@@ -648,6 +676,87 @@ static inline BOOL CATransform3DEqualToTransformEpsilon(CATransform3D t1, CATran
     XCTAssert( ! error, @"unexpected error: %@", error);
     // yes, this is dependent on how [NSDictionary description] behaves, but it's "good enough"
     XCTAssert( [result isEqualToString:@"{\n    a = 1;\n    b = 2;\n    c = 3;\n}"], @"result is wrong");
+
+    } XCTAssert( ExportObjectInstanceCount == 0, "ExportObject leak (%s): %d", __func__, ExportObjectInstanceCount);
+}
+
+- (void)testBlocks {
+    ExportObjectInstanceCount = 0; @autoreleasepool {
+
+    LuaContext *ctx = [LuaContext new];
+
+    ctx[@"v22"] = ^{
+        return @(22);
+    };
+    ctx[@"v33"] = ^{
+        return @(33);
+    };
+
+    NSString *script = @"return v22() + v33()";
+
+    NSError *error = nil;
+    [ctx parse:script error:&error];
+    XCTAssert( ! error, @"failed to load script: %@", error);
+
+    XCTAssert( [ctx.parseResult isEqual:@(55)], @"block invocation failed");
+
+    } XCTAssert( ExportObjectInstanceCount == 0, "ExportObject leak (%s): %d", __func__, ExportObjectInstanceCount);
+}
+
+
+- (void)testLeakIssue8 {
+    // tests issue #8
+    
+    ExportObjectInstanceCount = 0; @autoreleasepool {
+
+    LuaContext *ctx = [LuaContext new];
+
+    NSError *error = nil;
+    NSString *script = @"function setPublicPr (v) ex.publicString = v print(v) return v end";
+    [ctx parse:script error:&error];
+    XCTAssert( ! error, @"failed to load script: %@", error);
+
+    id result;
+    ExportObject *ex = [ExportObject new];
+    ctx[@"ex"] = ex;
+
+    result = [ctx call:"setPublicPr" with:@[ @5 ] error:&error];
+    NSLog(@"%d result: %@ error: %@", __LINE__, result, error);
+    XCTAssert( ! result && error, @"setting string to number succeeded");
+    XCTAssert( ! [result isEqualToString:ex.publicString], @"result is wrong");
+    error = nil;
+
+    } XCTAssert( ExportObjectInstanceCount == 0, "ExportObject leak (%s): %d", __func__, ExportObjectInstanceCount);
+}
+
+
+- (void)testIssue11 {
+    ExportObjectInstanceCount = 0; @autoreleasepool {
+
+    LuaContext *ctx = [LuaContext new];
+
+    NSError *error = nil;
+
+    NSString *script =
+@"storedObj = null"
+" function storeObj (obj) storedObj = obj end"
+" function returnObj () return storedObj end";
+    [ctx parse:script error:&error];
+    XCTAssert( ! error, @"failed to load script: %@", error);
+
+    id result;
+    ExportObject *ex = [ExportObject new];
+
+    [ctx call:"storeObj" with:@[ex] error:&error];
+    NSLog(@"%d error: %@", __LINE__, error);
+    XCTAssert( ! error, @"failed with: %@", error);
+
+    result = [ctx call:"returnObj" with:nil error:&error];
+    NSLog(@"%d result: %@ error: %@", __LINE__, result, error);
+    XCTAssert( ! error, @"failed with: %@", error);
+    XCTAssert( ex == result, @"result is wrong");
+
+    } XCTAssert( ExportObjectInstanceCount == 0, "ExportObject leak (%s): %d", __func__, ExportObjectInstanceCount);
 }
 
 @end
